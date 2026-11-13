@@ -1,123 +1,139 @@
-import numpy as np
-import pandas as pd
 import streamlit as st
-import statsmodels.formula.api as smf
-from scipy.optimize import curve_fit
-from scipy.stats import kruskal
-import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from supabase import create_client, Client
 
-st.set_page_config(page_title="Модель насыщения времени", layout="wide")
-st.title("Модель насыщения социального времени")
-st.caption("Демо на синтетической заглушке. Реальные данные не используются.")
+st.set_page_config(page_title="MortgagePro | Умная ипотека", layout="wide")
 
-def make_dummy(n_users=400, days_per_mode=14, seed=42):
-    rng = np.random.default_rng(seed)
-    modes = ["low", "medium", "high"]
-    rho_means = {"low": 4, "medium": 12, "high": 28}
-    rows = []
-    for uid in range(n_users):
-        base_sleep = rng.normal(7, 1)
-        base_stress = rng.normal(3.5, .8)
-        order = list(rng.permutation(modes))
-        for mode in order:
-            for d in range(days_per_mode):
-                rho = max(0, rng.normal(rho_means[mode], 3))
-                stress = np.clip(base_stress + (rho - 12) * .05 + rng.normal(0, .5), 1, 7)
-                sleep_h = np.clip(base_sleep + rng.normal(0, .5), 3, 10)
-                tau_true = 1.0 / (1 + rho / 18.0)
-                tau_current = np.clip(tau_true * 4 + rng.normal(0, .4), 1, 7)
-                tau_retro = np.clip((1 - tau_true) * 3 + 4 + rng.normal(0, .5), 1, 7)
-                rows.append(dict(
-                    user_id=uid, date=pd.Timestamp("2026-01-01") + pd.Timedelta(days=d + 14 * order.index(mode)),
-                    mode=mode, n_irrev=rho, stress=stress, sleep_h=sleep_h,
-                    tau_current=tau_current, tau_retro=tau_retro,
-                ))
-    df = pd.DataFrame(rows)
-    df["rho_s"] = df["n_irrev"]
-    df["tau_norm"] = df["tau_current"] / 4.0
-    df["inv_tau"] = 1 / df["tau_norm"]
-    return df
+# --- 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ SUPABASE ---
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-def saturation(rho, a, rho_c):
-    return a / (1 + rho / rho_c)
+supabase = init_connection()
 
-if st.button("Сгенерировать данные и запустить анализ", type="primary"):
-    with st.spinner("Генерирую заглушку и считаю..."):
-        df = make_dummy()
+# --- 2. АВТОРИЗАЦИЯ (упрощенная) ---
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = None
 
-        tab = df.groupby("mode")[["rho_s", "tau_current", "tau_retro", "stress", "sleep_h"]].mean().round(2)
-        st.subheader("1. Средние по режимам")
-        st.dataframe(tab)
+st.sidebar.title("👤 Личный кабинет")
 
-        groups = [g["rho_s"].values for _, g in df.groupby("mode")]
-        H, p = kruskal(*groups)
-        st.write(f"Kruskal–Wallis по ρ_s: H = {H:.1f}, p = {p:.3g}")
-        if p < .05:
-            st.success("Манипуляция сработала: режимы различаются по ρ_s")
+if not st.session_state.user_email:
+    st.sidebar.subheader("Вход в систему")
+    email_input = st.sidebar.text_input("Введите ваш Email")
+    if st.sidebar.button("Войти"):
+        if "@" in email_input:
+            st.session_state.user_email = email_input
+            st.sidebar.success(f"Привет, {email_input}!")
+            st.rerun()
         else:
-            st.error("Режимы не различаются")
-
-        st.subheader("2. H1 — кривая насыщения")
-        p0 = [df["tau_norm"].max(), df["rho_s"].median()]
-        popt, pcov = curve_fit(saturation, df["rho_s"], df["tau_norm"], p0=p0, maxfev=10000)
-        a_hat, rho_c_hat = popt
-        perr = np.sqrt(np.diag(pcov))
-        ss_res = np.sum((df["tau_norm"] - saturation(df["rho_s"], *popt)) ** 2)
-        ss_tot = np.sum((df["tau_norm"] - df["tau_norm"].mean()) ** 2)
-        r2 = 1 - ss_res / ss_tot
-        lin = smf.ols("tau_norm ~ rho_s", data=df).fit()
-        const = smf.ols("tau_norm ~ 1", data=df).fit()
-        n, k = len(df), 2
-        aic_nl = n * np.log(ss_res / n) + 2 * k
-        bic_nl = n * np.log(ss_res / n) + k * np.log(n)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("a", f"{a_hat:.3f} ± {perr[0]:.3f}")
-        c2.metric("ρ_c", f"{rho_c_hat:.1f} ± {perr[1]:.1f}")
-        c3.metric("R²", f"{r2:.3f}")
-
-        st.write(f"AIC/BIC — насыщение: {aic_nl:.1f}/{bic_nl:.1f}, линейная: {lin.aic:.1f}/{lin.bic:.1f}, константа: {const.aic:.1f}/{const.bic:.1f}")
-        better = aic_nl < min(lin.aic, const.aic)
-        if better:
-            st.success("H1 подтверждена: насыщение лучше по AIC")
-        else:
-            st.error("H1 под угрозой: насыщение не лучше")
-
-        xs = np.linspace(df["rho_s"].min(), df["rho_s"].max(), 200)
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.scatter(df["rho_s"], df["tau_norm"], alpha=.2, s=10)
-        ax.plot(xs, saturation(xs, *popt), "r-", label="насыщение")
-        ax.axvline(rho_c_hat, ls="--", c="k", label=f"ρ_c = {rho_c_hat:.1f}")
-        ax.set_xlabel("ρ_s (необр. фиксаций/день)")
-        ax.set_ylabel("τ_norm")
-        ax.legend()
-        st.pyplot(fig)
-
-        st.subheader("3. H3 — текущее vs ретроспективное время")
-        m_cur = smf.ols("tau_norm ~ rho_s", data=df).fit(cov_type="cluster", cov_kwds={"groups": df["user_id"]})
-        m_ret = smf.ols("tau_retro ~ rho_s", data=df).fit(cov_type="cluster", cov_kwds={"groups": df["user_id"]})
-        st.write(f"current: coef ρ_s = {m_cur.params['rho_s']:.4f}, p = {m_cur.pvalues['rho_s']:.3g}")
-        st.write(f"retro: coef ρ_s = {m_ret.params['rho_s']:.4f}, p = {m_ret.pvalues['rho_s']:.3g}")
-        ok = (m_cur.params["rho_s"] < 0) and (m_ret.params["rho_s"] >= 0)
-        if ok:
-            st.success("H3 подтверждена: знаки разные")
-        else:
-            st.error("H3 не подтверждена")
-
-        st.subheader("4. H2 — порог (проверка)")
-        df["bin"] = pd.qcut(df["rho_s"], 10, duplicates="drop")
-        disp = df.groupby("bin")["tau_norm"].std().round(3)
-        st.write("Дисперсия τ_norm по бинам ρ_s:")
-        st.dataframe(disp.rename("std").reset_index())
-        st.info("Ожидание H2: рост дисперсии за ρ_c. На заглушке дисперсия падает — H2 не подтверждена.")
-
-        st.subheader("Вердикт")
-        st.markdown(f"""
-- **H1 (насыщение):** {'✅ подтверждена' if better else '❌ под угрозой'}
-- **Контроль:** ρ_s значим (на заглушке)
-- **H2 (порог/перегрузка):** ❌ не подтверждена на заглушке
-- **H3 (current vs retro):** {'✅ подтверждена' if ok else '❌ не подтверждена'}
-- **ρ_c:** {rho_c_hat:.1f} (закладывали 18)
-""")
+            st.sidebar.error("Введите корректный Email (с @)")
 else:
-    st.info("Нажми кнопку выше, чтобы сгенерировать данные и запустить анализ.")
+    st.sidebar.success(f"Вы вошли как:\n**{st.session_state.user_email}**")
+    if st.sidebar.button("Выйти"):
+        st.session_state.user_email = None
+        st.rerun()
+
+# --- 3. ИНТЕРФЕЙС ---
+st.title("🏠 MortgagePro")
+tab1, tab2 = st.tabs(["🧮 Калькулятор", "💾 Мои сценарии"])
+
+with tab1:
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.subheader("Параметры")
+        total_cost = st.number_input("Стоимость (₽)", min_value=100000, value=5000000, step=100000)
+        initial_payment = st.number_input("Первый взнос (₽)", min_value=0, max_value=total_cost, value=1000000, step=50000)
+        rate = st.number_input("Ставка (%)", min_value=0.1, value=12.0, step=0.1)
+        years = st.slider("Срок (лет)", 1, 30, 20)
+        early_payment = st.number_input("Досрочный платеж (₽/мес)", min_value=0, value=0, step=5000)
+        early_strategy = st.radio("Стратегия:", ("Уменьшать срок", "Уменьшать платеж"))
+        calc_btn = st.button("Рассчитать", type="primary", use_container_width=True)
+
+    loan_amount = total_cost - initial_payment
+    
+    if calc_btn:
+        if loan_amount <= 0:
+            st.warning("Кредит не нужен!")
+        else:
+            monthly_rate = rate / 100 / 12
+            n_months = years * 12
+            monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate)**n_months) / ((1 + monthly_rate)**n_months - 1) if monthly_rate > 0 else loan_amount / n_months
+            
+            balance = loan_amount
+            total_interest = 0
+            schedule = []
+            months_actual = 0
+            
+            for month in range(1, n_months * 2 + 1):
+                if balance <= 0: break
+                interest = balance * monthly_rate
+                
+                if early_strategy == "Уменьшать платеж" and early_payment > 0 and month > 1:
+                    rem_months = n_months - month + 1
+                    monthly_payment = balance * (monthly_rate * (1 + monthly_rate)**rem_months) / ((1 + monthly_rate)**rem_months - 1) if monthly_rate > 0 else balance / rem_months
+                        
+                principal = monthly_payment - interest
+                if principal + early_payment >= balance:
+                    principal = balance - early_payment
+                    if principal < 0: principal = 0
+                    
+                balance = balance - principal - early_payment
+                total_interest += interest
+                
+                schedule.append({"Месяц": month, "Остаток долга": max(0, balance)})
+                months_actual = month
+
+            df = pd.DataFrame(schedule)
+            
+            with col2:
+                st.subheader("Результаты")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Платеж", f"{monthly_payment:,.0f} ₽".replace(",", " "))
+                c2.metric("Переплата", f"{total_interest:,.0f} ₽".replace(",", " "))
+                c3.metric("Срок", f"{months_actual//12} г. {months_actual%12} мес.")
+                
+                fig = px.area(df, x="Месяц", y="Остаток долга", title="График погашения долга")
+                st.plotly_chart(fig, use_container_width=True)
+
+                if st.session_state.user_email:
+                    if st.button("💾 Сохранить этот расчет в базу", type="primary"):
+                        # Отправляем данные в Supabase
+                        data = {
+                            "user_email": st.session_state.user_email,
+                            "total_cost": total_cost,
+                            "monthly_payment": round(monthly_payment, 2),
+                            "total_interest": round(total_interest, 2),
+                            "months_actual": months_actual
+                        }
+                        try:
+                            supabase.table("scenarios").insert(data).execute()
+                            st.success("Сценарий успешно сохранен в облачную базу данных!")
+                        except Exception as e:
+                            st.error(f"Ошибка сохранения: {e}")
+                else:
+                    st.info("Войдите слева, чтобы сохранять сценарии.")
+
+with tab2:
+    st.subheader("Мои сохраненные расчеты (из Базы Данных)")
+    if not st.session_state.user_email:
+        st.warning("Пожалуйста, войдите в систему.")
+    else:
+        # Запрашиваем данные из Supabase
+        try:
+            response = supabase.table("scenarios").select("*").eq("user_email", st.session_state.user_email).order("created_at", desc=True).execute()
+            
+            if response.data:
+                df_db = pd.DataFrame(response.data)
+                df_db = df_db.rename(columns={
+                    "total_cost": "Стоимость", "monthly_payment": "Платеж", 
+                    "total_interest": "Переплата", "months_actual": "Срок (мес)"
+                })
+                st.dataframe(df_db[["Стоимость", "Платеж", "Переплата", "Срок (мес)"]])
+            else:
+                st.write("У вас пока нет сохраненных сценариев в базе.")
+        except Exception as e:
+            st.error(f"Ошибка чтения из базы: {e}")
