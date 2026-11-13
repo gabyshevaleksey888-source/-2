@@ -1,6 +1,4 @@
 streamlit
-numpy
 pandas
-scipy
-statsmodels
-matplotlib
+numpy
+plotly
