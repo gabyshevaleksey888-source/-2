@@ -3,6 +3,7 @@ import pypdf
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
+import re  # <-- Добавили библиотеку для очистки текста
 
 st.set_page_config(page_title="AI Document Assistant", layout="wide")
 st.title("📄 AI-Ассистент по документам")
@@ -11,7 +12,7 @@ st.write("Загрузите PDF, и я отвечу на вопросы по е
 # Настройка клиента ProxyAPI
 try:
     client = OpenAI(
-        base_url="https://api.proxyapi.ru/v1", # <-- Адрес ProxyAPI
+        base_url="https://api.proxyapi.ru/v1", 
         api_key=st.secrets["PROXYAPI_KEY"],
     )
 except Exception:
@@ -28,8 +29,11 @@ def split_text(text, chunk_size=1000, overlap=200):
         start = end - overlap
     return chunks
 
+# Исправленная функция получения эмбеддингов (с очисткой от «битых» символов)
 def get_embedding(text):
-    # Очищаем текст от недопустимых символов (суррогатов)
+    # Удаляем суррогатные символы с помощью регулярного выражения
+    text = re.sub(r'[\ud800-\udfff]', '', text)
+    # На всякий случай очищаем от других некорректных символов
     safe_text = text.encode('utf-8', errors='ignore').decode('utf-8')
     
     response = client.embeddings.create(
