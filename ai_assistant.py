@@ -13,7 +13,6 @@ st.set_page_config(
 )
 
 # --- КАСТОМНЫЙ ДИЗАЙН (CSS) ---
-# Принудительно делаем светлую тему, чтобы карточки всегда читались
 st.markdown("""
 <style>
     /* Основной фон приложения */
@@ -56,6 +55,17 @@ st.markdown("""
     .feature-card h4 { margin-top: 0; color: #1E293B !important; font-size: 1.4rem; }
     .feature-card p { color: #475569 !important; font-size: 1rem; line-height: 1.6; }
     
+    /* Красивая плашка */
+    .hero-banner {
+        background: linear-gradient(135deg, #E0E7FF 0%, #F3E8FF 100%);
+        padding: 40px;
+        border-radius: 16px;
+        text-align: center;
+        margin-bottom: 30px;
+        border: 1px solid #C7D2FE;
+    }
+    .hero-banner h3 { color: #3730A3 !important; margin: 0; font-size: 1.8rem; }
+    
     /* Кнопки */
     .stButton>button { 
         background: linear-gradient(90deg, #2563EB, #1D4ED8); 
@@ -71,9 +81,6 @@ st.markdown("""
         background: linear-gradient(90deg, #1D4ED8, #1E40AF); 
         transform: scale(1.02);
     }
-    
-    /* Поле ввода чата */
-    .stChatInput { border-radius: 20px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,10 +175,13 @@ if not st.session_state.document_chunks:
     st.markdown("<h1 class='main-title'>DocuMind AI 🧠</h1>", unsafe_allow_html=True)
     st.markdown("<p class='sub-title'>Превратите скучные PDF в умного собеседника. Загрузите договор, отчет или статью и просто задайте вопрос.</p>", unsafe_allow_html=True)
     
-    # Красивая картинка-баннер
-    st.image("https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=1200&auto=format&fit=crop", use_column_width=True, caption="Технологии будущего уже здесь")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
+    # Красивая и надежная плашка вместо картинки
+    st.markdown("""
+        <div class='hero-banner'>
+            <h3>✨ Технологии будущего уже здесь ✨</h3>
+            <p style='color: #4338CA; margin-top: 10px; font-size: 1.1rem;'>Ваш личный AI-помощник для работы с документами</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     # Карточки
     col1, col2, col3 = st.columns(3)
