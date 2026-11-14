@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz  # Это и есть PyMuPDF
+import fitz  # PyMuPDF
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
@@ -8,14 +8,27 @@ st.set_page_config(page_title="AI Document Assistant", layout="wide")
 st.title("📄 AI-Ассистент по документам")
 st.write("Загрузите PDF, и я отвечу на вопросы по его содержанию (работает без VPN).")
 
+# --- ПРОВЕРКА КЛЮЧА НА РУССКИЕ БУКВЫ ---
+api_key = st.secrets.get("PROXYAPI_KEY", "")
+if not api_key:
+    st.error("Ошибка: Ключ PROXYAPI_KEY не найден в Secrets.")
+    st.stop()
+
+try:
+    # Проверяем, что в ключе только английские символы (ASCII)
+    api_key.encode('ascii')
+except UnicodeEncodeError:
+    st.error("⚠️ В вашем API-ключе есть русские буквы или лишние символы! Пожалуйста, зайдите в Secrets и скопируйте ключ заново, внимательно проверяя каждую букву.")
+    st.stop()
+
 # Настройка клиента ProxyAPI
 try:
     client = OpenAI(
         base_url="https://api.proxyapi.ru/v1", 
-        api_key=st.secrets["PROXYAPI_KEY"],
+        api_key=api_key,
     )
-except Exception:
-    st.error("Ошибка: Добавьте PROXYAPI_KEY в Secrets.")
+except Exception as e:
+    st.error(f"Ошибка инициализации клиента: {e}")
     st.stop()
 
 # Функция для разбивки текста на куски
@@ -53,7 +66,7 @@ with st.sidebar:
         if st.button("Обработать документ", type="primary"):
             with st.spinner("Читаю и анализирую документ..."):
                 try:
-                    # Читаем файл через PyMuPDF (fitz)
+                    # Читаем файл
                     pdf_bytes = uploaded_file.read()
                     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                     
@@ -63,7 +76,11 @@ with st.sidebar:
                     
                     st.session_state.document_chunks = split_text(full_text)
                     
-                    # Векторизуем каждый кусочек
+                    if len(st.session_state.document_chunks) == 0:
+                        st.error("Не удалось извлечь текст из этого PDF. Возможно, он состоит только из картинок (сканов).")
+                        st.stop()
+                    
+                    # Векторизуем
                     embeddings = []
                     for chunk in st.session_state.document_chunks:
                         embeddings.append(get_embedding(chunk))
@@ -73,7 +90,7 @@ with st.sidebar:
                     st.success(f"Готово! Разбит на {len(st.session_state.document_chunks)} фрагментов.")
                     st.session_state.messages = []
                 except Exception as e:
-                    st.error(f"Ошибка при чтении PDF: {e}")
+                    st.error(f"Ошибка: {e}")
 
 # Основной чат
 for message in st.session_state.messages:
