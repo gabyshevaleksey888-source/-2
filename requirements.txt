@@ -3,6 +3,6 @@ pandas
 numpy
 plotly
 supabase
-pypdf
+pymupdf
 openai
 scikit-learn
