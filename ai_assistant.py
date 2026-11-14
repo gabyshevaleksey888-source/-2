@@ -1,5 +1,5 @@
 import streamlit as st
-import pypdf
+import fitz  # Это и есть PyMuPDF
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
@@ -18,30 +18,21 @@ except Exception:
     st.error("Ошибка: Добавьте PROXYAPI_KEY в Secrets.")
     st.stop()
 
-# Надежная функция очистки текста от любых «битых» символов
-def clean_text(text):
-    if not text:
-        return ""
-    # Превращаем суррогатные символы в безопасные
-    return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
-
 # Функция для разбивки текста на куски
 def split_text(text, chunk_size=1000, overlap=200):
-    clean = clean_text(text)
     chunks = []
     start = 0
-    while start < len(clean):
+    while start < len(text):
         end = start + chunk_size
-        chunks.append(clean[start:end])
+        chunks.append(text[start:end])
         start = end - overlap
     return chunks
 
 # Функция для получения эмбеддингов
 def get_embedding(text):
-    safe_text = clean_text(text)
     response = client.embeddings.create(
         model="openai/text-embedding-3-small",
-        input=safe_text
+        input=text
     )
     return response.data[0].embedding
 
@@ -62,13 +53,13 @@ with st.sidebar:
         if st.button("Обработать документ", type="primary"):
             with st.spinner("Читаю и анализирую документ..."):
                 try:
-                    reader = pypdf.PdfReader(uploaded_file)
+                    # Читаем файл через PyMuPDF (fitz)
+                    pdf_bytes = uploaded_file.read()
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    
                     full_text = ""
-                    for page in reader.pages:
-                        # Извлекаем текст и сразу чистим его
-                        extracted = page.extract_text()
-                        if extracted:
-                            full_text += extracted + "\n"
+                    for page in doc:
+                        full_text += page.get_text() + "\n"
                     
                     st.session_state.document_chunks = split_text(full_text)
                     
