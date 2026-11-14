@@ -28,11 +28,13 @@ def split_text(text, chunk_size=1000, overlap=200):
         start = end - overlap
     return chunks
 
-# Функция для получения эмбеддингов
 def get_embedding(text):
+    # Очищаем текст от недопустимых символов (суррогатов)
+    safe_text = text.encode('utf-8', errors='ignore').decode('utf-8')
+    
     response = client.embeddings.create(
         model="openai/text-embedding-3-small",
-        input=text
+        input=safe_text
     )
     return response.data[0].embedding
 
