@@ -3,7 +3,6 @@ import pypdf
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
-import re  # <-- Добавили библиотеку для очистки текста
 
 st.set_page_config(page_title="AI Document Assistant", layout="wide")
 st.title("📄 AI-Ассистент по документам")
@@ -19,23 +18,27 @@ except Exception:
     st.error("Ошибка: Добавьте PROXYAPI_KEY в Secrets.")
     st.stop()
 
+# Надежная функция очистки текста от любых «битых» символов
+def clean_text(text):
+    if not text:
+        return ""
+    # Превращаем суррогатные символы в безопасные
+    return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+
 # Функция для разбивки текста на куски
 def split_text(text, chunk_size=1000, overlap=200):
+    clean = clean_text(text)
     chunks = []
     start = 0
-    while start < len(text):
+    while start < len(clean):
         end = start + chunk_size
-        chunks.append(text[start:end])
+        chunks.append(clean[start:end])
         start = end - overlap
     return chunks
 
-# Исправленная функция получения эмбеддингов (с очисткой от «битых» символов)
+# Функция для получения эмбеддингов
 def get_embedding(text):
-    # Удаляем суррогатные символы с помощью регулярного выражения
-    text = re.sub(r'[\ud800-\udfff]', '', text)
-    # На всякий случай очищаем от других некорректных символов
-    safe_text = text.encode('utf-8', errors='ignore').decode('utf-8')
-    
+    safe_text = clean_text(text)
     response = client.embeddings.create(
         model="openai/text-embedding-3-small",
         input=safe_text
@@ -58,16 +61,28 @@ with st.sidebar:
     if uploaded_file is not None:
         if st.button("Обработать документ", type="primary"):
             with st.spinner("Читаю и анализирую документ..."):
-                reader = pypdf.PdfReader(uploaded_file)
-                full_text = ""
-                for page in reader.pages:
-                    full_text += page.extract_text() + "\n"
-                
-                st.session_state.document_chunks = split_text(full_text)
-                st.session_state.document_embeddings = [get_embedding(chunk) for chunk in st.session_state.document_chunks]
-                
-                st.success(f"Готово! Разбит на {len(st.session_state.document_chunks)} фрагментов.")
-                st.session_state.messages = []
+                try:
+                    reader = pypdf.PdfReader(uploaded_file)
+                    full_text = ""
+                    for page in reader.pages:
+                        # Извлекаем текст и сразу чистим его
+                        extracted = page.extract_text()
+                        if extracted:
+                            full_text += extracted + "\n"
+                    
+                    st.session_state.document_chunks = split_text(full_text)
+                    
+                    # Векторизуем каждый кусочек
+                    embeddings = []
+                    for chunk in st.session_state.document_chunks:
+                        embeddings.append(get_embedding(chunk))
+                        
+                    st.session_state.document_embeddings = embeddings
+                    
+                    st.success(f"Готово! Разбит на {len(st.session_state.document_chunks)} фрагментов.")
+                    st.session_state.messages = []
+                except Exception as e:
+                    st.error(f"Ошибка при чтении PDF: {e}")
 
 # Основной чат
 for message in st.session_state.messages:
