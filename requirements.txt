@@ -6,3 +6,5 @@ supabase
 pymupdf
 openai
 scikit-learn
+streamlit
+Pillow
