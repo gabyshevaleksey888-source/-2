@@ -8,3 +8,7 @@ openai
 scikit-learn
 streamlit
 Pillow
+streamlit
+openai
+youtube-transcript-api
+trafilatura
